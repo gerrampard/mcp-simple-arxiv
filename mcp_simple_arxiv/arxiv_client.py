@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 import feedparser
 import httpx
 from typing import Optional, Dict, List, Any
+from docling.document_converter import DocumentConverter
 
 logger = logging.getLogger(__name__)
 
@@ -203,3 +204,53 @@ class ArxivClient:
             except httpx.HTTPError as e:
                 logger.error(f"HTTP error while fetching paper: {e}")
                 raise ValueError(f"arXiv API HTTP error: {str(e)}")
+
+    async def get_paper_text_from_pdf(self, paper_id: str) -> str:
+        """
+        Get the full paper text as Markdown using Docling.
+        
+        Downloads and converts the paper PDF to Markdown format.
+        This operation may take 30-90 seconds depending on paper length and complexity.
+        
+        Args:
+            paper_id: arXiv paper ID (e.g., "2103.08220")
+            
+        Returns:
+            Markdown-formatted text of the paper, or an error message if conversion fails.
+            
+        Note:
+            - Complex equations and figures may not convert perfectly
+            - Very large papers may exceed typical context windows
+            - Conversion is resource-intensive (CPU and memory)
+        """
+        await self._wait_for_rate_limit()
+  
+        paper = await self.get_paper(paper_id)
+        if not paper["pdf_url"]:
+            return f"No PDF URL found for paper: {paper_id}"
+
+        # We have the PDF URL so we can proceed
+        # Run the synchronous PDF conversion in a thread pool to avoid blocking
+        try:
+            loop = asyncio.get_event_loop()
+             
+            def convert_paper():
+                converter = DocumentConverter()
+                result = converter.convert(paper["pdf_url"])
+                return result.document.export_to_markdown()
+            
+            # Add timeout to prevent hanging on very large or problematic PDFs    
+            markdown = await asyncio.wait_for(
+                loop.run_in_executor(None, convert_paper),
+                timeout=120.0  # 2 minute timeout
+            )
+            return markdown
+            
+        except asyncio.TimeoutError:
+            error_msg = f"Timeout: PDF conversion exceeded 120 seconds for paper {paper_id}"
+            logger.error(error_msg)
+            return error_msg
+            
+        except Exception as e:
+            logger.error(f"Error converting paper {paper_id} to Markdown: {e}", exc_info=True)
+            return f"Error while converting paper to Markdown: {str(e)}"

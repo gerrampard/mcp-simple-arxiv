@@ -123,12 +123,33 @@ Examples:
         result += "- PDF version: " + paper["pdf_url"] + "\n"
         
         # Additional information section
-        if paper["comment"] or "code" in paper["comment"].lower():
+        if paper["comment"]:
             result += "\nAdditional Information:\n"
             if paper["comment"]:
                 result += "- Comment: " + paper["comment"] + "\n"
                 
         return result
+
+    @app.tool(
+        annotations={
+            "title": "Get full paper text as Markdown",
+            "readOnlyHint": True,
+            "openWorldHint": True
+        }
+    )
+    async def get_full_paper_text(paper_id: str) -> str:
+        """Get the full paper text as Markdown
+        
+        Downloads and converts the paper PDF to Markdown format using Docling.
+        This operation takes 30-90 seconds depending on paper length.
+        
+        Important considerations:
+        - Papers can be very large (even 10k-50k+ tokens) and may overwhelm your context window
+        - Complex equations and figures will most likely not convert correctly to Markdown
+        - Use get_paper_data first to review abstract before fetching full text
+        """
+        paper = await arxiv_client.get_paper_text_from_pdf(paper_id)
+        return paper
 
     @app.tool(
         annotations={
@@ -184,7 +205,7 @@ Examples:
             logger.error(f"Error updating taxonomy: {e}")
             # FastMCP will handle raising this as a proper JSON-RPC error
             raise e
-            
+
     return app
 
 app = create_app()
