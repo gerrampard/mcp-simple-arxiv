@@ -83,10 +83,40 @@ async def check_server_ready(client: httpx.AsyncClient):
     logging.error("Web server did not start in time.")
     return False
 
+def parse_sse_response(response_text: str) -> dict:
+    """
+    Parse Server-Sent Events response and extract JSON data.
+
+    Args:
+        response_text: Raw SSE response text.
+
+    Returns:
+        Parsed JSON data from the response.
+
+    Raises:
+        ValueError: If no valid data event is found.
+    """
+    import json
+    for line in response_text.strip().split('\n'):
+        if line.startswith('data:'):
+            return json.loads(line[len('data:'):].strip())
+    raise ValueError("Did not receive a valid data event from the server.")
+
+
 async def call_tool(client: httpx.AsyncClient, tool_name: str, params: dict = None) -> dict:
-    """Helper function to call a tool via JSON-RPC."""
+    """
+    Helper function to call a tool via JSON-RPC.
+
+    Args:
+        client: HTTP client instance.
+        tool_name: Name of the tool to call.
+        params: Optional parameters for the tool.
+
+    Returns:
+        Parsed JSON-RPC response.
+    """
     method = "tools/call" if tool_name != "tools/list" else "tools/list"
-    
+
     payload = {
         "jsonrpc": "2.0",
         "id": 1,
@@ -95,15 +125,99 @@ async def call_tool(client: httpx.AsyncClient, tool_name: str, params: dict = No
 
     if method == "tools/call":
         payload["params"] = {"name": tool_name, "arguments": params or {}}
-    
+
     response = await client.post(SERVER_URL, json=payload, headers=HEADERS)
     response.raise_for_status()
-    # The response is Server-Sent Events, we need to parse it
-    for line in response.text.strip().split('\n'):
-        if line.startswith('data:'):
-            import json
-            return json.loads(line[len('data:'):].strip())
-    raise ValueError("Did not receive a valid data event from the server.")
+    return parse_sse_response(response.text)
+
+
+async def call_background_tool(
+    client: httpx.AsyncClient,
+    tool_name: str,
+    params: dict = None,
+    poll_interval: float = 2.0,
+    timeout: float = 180.0
+) -> str:
+    """
+    Call a tool that runs as a background task, polling until complete.
+
+    For tools with task=True, the server returns a task ID immediately.
+    This function polls for task completion and returns the final result.
+
+    Args:
+        client: HTTP client instance.
+        tool_name: Name of the tool to call.
+        params: Optional parameters for the tool.
+        poll_interval: Seconds between status checks.
+        timeout: Maximum seconds to wait for completion.
+
+    Returns:
+        The tool's result string.
+
+    Raises:
+        TimeoutError: If task doesn't complete within timeout.
+        ValueError: If task fails or returns unexpected response.
+    """
+    import json
+
+    # Initial call - may return task info or immediate result
+    response_json = await call_tool(client, tool_name, params)
+
+    # Check if this is a background task response
+    # Background tasks return a notification with task info
+    result = response_json.get('result', {})
+
+    # If we got a direct result (non-background), return it
+    if 'structuredContent' in result:
+        return result['structuredContent']['result']
+
+    # For background tasks, we need to poll for completion
+    # The response format for background tasks includes task metadata
+    if 'task' not in result:
+        # Try to extract task ID from the response structure
+        # FastMCP may use different response formats
+        raise ValueError(f"Unexpected response format: {response_json}")
+
+    task_id = result['task']['id']
+    logging.info(f"Background task started with ID: {task_id}")
+
+    # Poll for task completion
+    elapsed = 0.0
+    while elapsed < timeout:
+        await asyncio.sleep(poll_interval)
+        elapsed += poll_interval
+
+        # Check task status
+        status_payload = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tasks/get",
+            "params": {"id": task_id}
+        }
+        status_response = await client.post(SERVER_URL, json=status_payload, headers=HEADERS)
+        status_response.raise_for_status()
+        status_json = parse_sse_response(status_response.text)
+
+        task_result = status_json.get('result', {})
+        task_status = task_result.get('status', '')
+
+        logging.info(f"Task status: {task_status} (elapsed: {elapsed:.0f}s)")
+
+        if task_status == 'completed':
+            # Extract the result from completed task
+            task_output = task_result.get('output', {})
+            if 'structuredContent' in task_output:
+                return task_output['structuredContent']['result']
+            elif 'result' in task_output:
+                return task_output['result']
+            else:
+                return str(task_output)
+
+        elif task_status == 'failed':
+            error_msg = task_result.get('error', 'Unknown error')
+            raise ValueError(f"Background task failed: {error_msg}")
+
+    raise TimeoutError(f"Background task {task_id} did not complete within {timeout} seconds")
 
 
 async def main():
@@ -219,15 +333,21 @@ async def main():
                 logging.error(f"❌ {test_name} test FAILED: {e}")
                 summary.add_result(test_name, passed=False, error_message=str(e))
 
-            # 4. Test get_full_paper_text (this takes 30-90 seconds)
+            # 4. Test get_full_paper_text (background task - takes 30-90 seconds)
             test_name = "get_full_paper_text"
             try:
                 logging.info(f"\n--- Testing {test_name} ---")
                 paper_id = "0808.3772"  # Same paper, relatively short
                 logging.info(f"Calling get_full_paper_text with paper_id: '{paper_id}'")
-                logging.info("(This may take 30-90 seconds as it downloads and converts the PDF...)")
-                response_json = await call_tool(client, "get_full_paper_text", {"paper_id": paper_id})
-                result = response_json['result']['structuredContent']['result']
+                logging.info("(This runs as a background task - polling for completion...)")
+                # Use background task helper which handles polling
+                result = await call_background_tool(
+                    client,
+                    "get_full_paper_text",
+                    {"paper_id": paper_id},
+                    poll_interval=3.0,
+                    timeout=180.0
+                )
                 # Check that we got markdown content back (should contain the title)
                 assert "common mass scale" in result.lower() or "satellite galaxies" in result.lower()
                 logging.info(f"Result length: {len(result)} characters")

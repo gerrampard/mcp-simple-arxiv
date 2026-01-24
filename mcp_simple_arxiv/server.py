@@ -202,6 +202,7 @@ Args:
         return result
 
     @app.tool(
+        task=True,
         annotations={
             "title": "Get full paper text as Markdown",
             "readOnlyHint": True,

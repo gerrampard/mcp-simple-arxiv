@@ -62,14 +62,47 @@ curl -X POST http://127.0.0.1:8000/mcp \
 
 ## Docker Deployment
 
-The project includes a `Dockerfile.web` for easy containerization.
+The project includes a `Dockerfile.web` for containerization and a `docker-compose.yml` for production deployment with Redis.
 
-### 1. Build the Docker Image
+### Background Tasks
+
+The `get_full_paper_text` tool runs as a background task (30-90 seconds for PDF conversion). This means:
+- The server returns immediately with a task ID
+- Clients poll for task completion
+- With Redis: tasks survive server restarts
+- Without Redis: tasks are stored in memory (lost on restart)
+
+### Option A: Docker Compose (Recommended for Production)
+
+Docker Compose runs the server with Redis for persistent background tasks:
+
+```bash
+# Build and start both services
+docker-compose up -d --build
+
+# View logs
+docker-compose logs -f
+
+# Stop services
+docker-compose down
+```
+
+This creates two containers:
+- `arxiv-server`: The MCP server on port 8000
+- `redis`: Redis for task persistence
+
+The `redis-data` volume persists task data across container restarts.
+
+### Option B: Standalone Docker (Simple Deployment)
+
+For simpler deployments without task persistence:
+
+#### 1. Build the Docker Image
 ```bash
 docker build -f Dockerfile.web -t mcp-simple-arxiv:web .
 ```
 
-### 2. Run the Docker Container
+#### 2. Run the Docker Container
 
 To run the container for use with a local reverse proxy (like Apache or Nginx), you should map the container’s port only to the host’s loopback interface:
 ```bash
