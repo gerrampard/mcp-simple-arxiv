@@ -12,8 +12,12 @@ An MCP server that provides access to arXiv papers through their API.
 
 This server allows LLM clients (like Claude Desktop) to:
 - Search for scientific papers on arXiv by title and abstract content
+- Control search result sorting (by submission date, update date, or relevance)
+- See total matching results count to gauge search specificity
 - Get paper metadata and abstracts
+- Retrieve full paper text as Markdown (converted from PDF)
 - Access links to available paper formats (PDF/HTML)
+- Browse and search arXiv subject categories
 
 To use the web version just add this connector to Claude.ai https://mcp.andybrandt.net/arxiv .
 You can also install & use it locally. 
@@ -77,11 +81,17 @@ You can ask Claude to search for papers using queries like:
 Can you search arXiv for recent papers about large language models?
 ```
 
-The search will return basic information about matching papers including:
-- Paper title
-- Authors
-- arXiv ID
+The LLM can sort results by submission date, update date, or relevance:
+```
+Search arXiv for papers about transformers, sorted by relevance.
+```
+
+Search results include:
+- Total number of matching papers (e.g., "Found 15,234 total results, showing first 10")
+- Paper title, authors, and arXiv ID
+- Categories (primary and additional)
 - Publication date
+- Abstract preview
 
 ### Getting Paper Details
 
@@ -99,7 +109,7 @@ This will return:
 - Links to available formats (PDF/HTML)
 
 
-*For web deployment see [DEPLOYMENT.md](DEPLOYMENT.md)*.
+*For web deployment see [WEB_DEPLOYMENT.md](WEB_DEPLOYMENT.md)*.
 
 ## Development
 
