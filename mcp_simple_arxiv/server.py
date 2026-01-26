@@ -71,22 +71,42 @@ def create_app() -> FastMCP:
         sort_order: str = "descending"
     ) -> str:
         """
-Search for papers on arXiv by title and abstract content.
+Search for papers on arXiv.
 
-You can use advanced search syntax:
-- Search in title: ti:"search terms"
-- Search in abstract: abs:"search terms"
-- Search by author: au:"author name"
-- Combine terms with: AND, OR, ANDNOT
-- Filter by category: cat:cs.AI (use list_categories tool to see available categories)
+IMPORTANT - DEFAULT BEHAVIOR WARNING:
+ArXiv treats space-separated words as OR by default, returning papers matching
+ANY word. This often returns thousands of irrelevant results. Use field
+prefixes (especially ti:) for precise searches.
 
-Examples:
-- "machine learning"  (searches all fields)
-- ti:"neural networks" AND cat:cs.AI  (title with category)
-- au:bengio AND ti:"deep learning"  (author and title)
+SEARCH STRATEGY (in order of precision):
+1. Start with ti: (title) searches - fastest and most relevant results
+2. Add cat: (category) to filter by field - use list_categories tool first!
+3. Use au: (author) when you know specific researchers
+4. Combine multiple terms with AND for best results
+5. Avoid plain keyword searches without field prefixes
+
+QUERY OPERATORS:
+- ti:"text"   - Search in title only (RECOMMENDED FOR PRECISION)
+- abs:"text"  - Search in abstract
+- au:"name"   - Search by author
+- cat:CODE    - Filter by category (e.g., cat:cs.AI, cat:quant-ph)
+- Combine with: AND, OR, ANDNOT
+
+EXAMPLES (from most to least precise):
+- ti:"neural networks" AND cat:cs.AI     - Title phrase + category (BEST)
+- ti:"deep learning" AND au:bengio       - Title + author
+- cat:cs.AI AND ti:transformer           - Category + title keyword
+- ti:"machine learning"                  - Title phrase only
+- "machine learning"                     - All fields (broad, use sparingly)
+
+TROUBLESHOOTING - Too many irrelevant results?
+1. Use ti:"exact phrase" instead of bare keywords
+2. Add cat:CATEGORY to filter by field (run list_categories first)
+3. Use AND to combine multiple specific terms
+4. Avoid generic terms without ti: or cat: prefixes
 
 Args:
-    query: Search query string.
+    query: Search query string (use field prefixes for precision).
     max_results: Maximum results to return (1-100, default 10).
     sort_by: Sort field - "submitted_date", "updated_date", or "relevance".
     sort_order: Sort direction - "descending" or "ascending".
@@ -231,7 +251,22 @@ Args:
         }
     )
     def list_categories(primary_category: str = None) -> str:
-        """List all available arXiv categories and how to use them in search."""
+        """List all available arXiv categories for use with cat: filter in search_papers.
+
+        CALL THIS FIRST before using cat: in search queries to find valid category codes.
+
+        Common categories:
+        - cs.AI (Artificial Intelligence)
+        - cs.LG (Machine Learning)
+        - cs.CL (Computation and Language / NLP)
+        - stat.ML (Statistics - Machine Learning)
+        - quant-ph (Quantum Physics)
+        - q-bio.NC (Quantitative Biology - Neurons and Cognition)
+
+        Args:
+            primary_category: Optional filter to show only subcategories of a specific
+                primary category (e.g., "cs", "physics", "q-bio").
+        """
         try:
             taxonomy = load_taxonomy()
         except Exception as e:
